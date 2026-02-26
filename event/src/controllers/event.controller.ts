@@ -125,6 +125,8 @@ async function handleOrderCreated(
     redemptionRates
   );
 
+  logger.info(`Order ${orderId}: pointsFromPayments: ${pointsFromPayments}, pointsToDeduct: ${pointsToDeduct}`);
+
 
   const {
     body: customer,
@@ -142,6 +144,8 @@ async function handleOrderCreated(
   const currentPoints = getCurrentAvailablePoints(
     customer as Parameters<typeof getCurrentAvailablePoints>[0]
   );
+
+  logger.info(`Order ${orderId}: currentPoints: ${currentPoints}`);
   const newPoints = Math.max(0, currentPoints + pointsFromPayments - pointsToDeduct);
 
   const actions: CustomerUpdateAction[] = [];

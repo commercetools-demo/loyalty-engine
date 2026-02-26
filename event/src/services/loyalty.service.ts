@@ -147,11 +147,12 @@ export async function getPointsFromPayments(
         .get()
         .execute();
       const amount = payment.amountPlanned;
-      if (amount && typeof amount.centAmount === 'number') {
+      if (amount && typeof amount.centAmount === 'number'  && payment.transactions?.some(t => t.state === 'Success')) {
         const currency =
           (amount as { currencyCode?: string }).currencyCode ??
           (amount as { currency?: string }).currency;
         if (currency) {
+          logger.info(`Converting ${amount.centAmount} ${currency} to points `);
           totalPoints += currencyToPoints(
             amount.centAmount,
             currency,
