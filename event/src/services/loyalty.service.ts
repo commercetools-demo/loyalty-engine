@@ -2,10 +2,12 @@ import { ByProjectKeyRequestBuilder } from '@commercetools/platform-sdk/dist/dec
 import { ConversionRateRow } from '../types/index.types';
 import { logger } from '../utils/logger.utils';
 
-/** Custom object container for loyalty conversion rates. */
+/** Custom object container for loyalty conversion and redemption rates. */
 export const LOYALTY_CONTAINER = 'LOYALTY_CONTAINER';
-/** Custom object key for conversion rates. */
+/** Custom object key for conversion rates (currency → points earned). */
 export const CONVERSION_RATES_KEY = 'CONVERSION_RATES';
+/** Custom object key for redemption rates (currency discount → points deducted). */
+export const REDEMPTION_RATES_KEY = 'REDEMPTION_RATES';
 /** Customer custom field name for available points. */
 export const AVAILABLE_POINTS_KEY = 'availablePoints';
 /** Customer custom type key for loyalty (additional-customer-info). */
@@ -13,59 +15,114 @@ export const CUSTOMER_LOYALTY_CUSTOM_TYPE = 'additional-customer-info';
 /** Order state key that indicates cancellation (reverse points). */
 export const CANCELLED_STATE_KEY = 'Cancelled';
 
+function fetchRatesFromCustomObject(
+  apiRoot: ByProjectKeyRequestBuilder,
+  key: string
+): Promise<ConversionRateRow[]> {
+  return apiRoot
+    .customObjects()
+    .withContainerAndKey({
+      container: LOYALTY_CONTAINER,
+      key,
+    })
+    .get()
+    .execute()
+    .then(({ body }) => {
+      const value = body.value as unknown;
+      if (!Array.isArray(value)) {
+        logger.warn(`Custom object ${key} value is not an array`);
+        return [];
+      }
+      const rows = value as ConversionRateRow[];
+      if (
+        !rows.every(
+          (r) =>
+            typeof r.currency === 'string' &&
+            typeof r.currencyCentAmount === 'number' &&
+            typeof r.pointAmount === 'number'
+        )
+      ) {
+        logger.warn(`Custom object ${key} array has invalid row shape`);
+        return [];
+      }
+      return rows;
+    });
+}
+
 /**
  * Fetches the loyalty conversion rates from the custom object
  * (container: LOYALTY_CONTAINER, key: CONVERSION_RATES).
+ * Used for converting payment amount → points earned.
  */
 export async function getConversionRates(
   apiRoot: ByProjectKeyRequestBuilder
 ): Promise<ConversionRateRow[]> {
-  const { body } = await apiRoot
-    .customObjects()
-    .withContainerAndKey({
-      container: LOYALTY_CONTAINER,
-      key: CONVERSION_RATES_KEY,
-    })
-    .get()
-    .execute();
+  return fetchRatesFromCustomObject(apiRoot, CONVERSION_RATES_KEY);
+}
 
-  const value = body.value as unknown;
-  if (!Array.isArray(value)) {
-    logger.warn('Conversion rates custom object value is not an array');
-    return [];
+/**
+ * Fetches the redemption rates from the custom object
+ * (container: LOYALTY_CONTAINER, key: REDEMPTION_RATES).
+ * Same structure as CONVERSION_RATES; used for discount amount → points deducted.
+ */
+export async function getRedemptionRates(
+  apiRoot: ByProjectKeyRequestBuilder
+): Promise<ConversionRateRow[]> {
+  return fetchRatesFromCustomObject(apiRoot, REDEMPTION_RATES_KEY);
+}
+
+/**
+ * Converts a currency amount (in cents) to points using a rate table.
+ * Uses floor rounding. Returns 0 if no rate found for the currency.
+ */
+function currencyToPointsWithRates(
+  centAmount: number,
+  currencyCode: string,
+  rates: ConversionRateRow[],
+  rateLabel: string
+): number {
+  const rate = rates.find(
+    (r) => r.currency.toUpperCase() === currencyCode.toUpperCase()
+  );
+  if (!rate || rate.currencyCentAmount <= 0) {
+    logger.debug(`No ${rateLabel} for currency ${currencyCode}`);
+    return 0;
   }
-  const rows = value as ConversionRateRow[];
-  if (
-    !rows.every(
-      (r) =>
-        typeof r.currency === 'string' &&
-        typeof r.currencyCentAmount === 'number' &&
-        typeof r.pointAmount === 'number'
-    )
-  ) {
-    logger.warn('Conversion rates array has invalid row shape');
-    return [];
-  }
-  return rows;
+  return Math.floor((centAmount / rate.currencyCentAmount) * rate.pointAmount);
 }
 
 /**
  * Converts a currency amount (in cents) to loyalty points using the conversion table.
- * Uses floor rounding. Returns 0 if no rate found for the currency.
+ * Used for payment amount → points earned.
  */
 export function currencyToPoints(
   centAmount: number,
   currencyCode: string,
   conversionRates: ConversionRateRow[]
 ): number {
-  const rate = conversionRates.find(
-    (r) => r.currency.toUpperCase() === currencyCode.toUpperCase()
+  return currencyToPointsWithRates(
+    centAmount,
+    currencyCode,
+    conversionRates,
+    'conversion rate'
   );
-  if (!rate || rate.currencyCentAmount <= 0) {
-    logger.debug(`No conversion rate for currency ${currencyCode}`);
-    return 0;
-  }
-  return Math.floor((centAmount / rate.currencyCentAmount) * rate.pointAmount);
+}
+
+/**
+ * Converts a discount currency amount (in cents) to points to deduct using the redemption table.
+ * Used for point-redemption discount amount → points deducted.
+ */
+export function currencyToRedemptionPoints(
+  centAmount: number,
+  currencyCode: string,
+  redemptionRates: ConversionRateRow[]
+): number {
+  return currencyToPointsWithRates(
+    centAmount,
+    currencyCode,
+    redemptionRates,
+    'redemption rate'
+  );
 }
 
 /**
@@ -143,6 +200,7 @@ function getDiscountCentAmount(value: {
 
 /**
  * Sums loyalty points to deduct for point-redemption discounts applied on the order.
+ * Uses redemption rates (REDEMPTION_RATES) to convert discount currency amount → points.
  * Uses order.discountOnTotalPrice.includedDiscounts and/or order.directDiscounts.
  */
 export async function getPointRedemptionPointsToDeduct(
@@ -160,7 +218,7 @@ export async function getPointRedemptionPointsToDeduct(
     };
   },
   apiRoot: ByProjectKeyRequestBuilder,
-  conversionRates: ConversionRateRow[]
+  redemptionRates: ConversionRateRow[]
 ): Promise<number> {
   const orderCartId = order.cart?.id;
   let totalPointsToDeduct = 0;
@@ -194,10 +252,10 @@ export async function getPointRedemptionPointsToDeduct(
               (amount as { currencyCode?: string }).currencyCode ??
               (amount as { currency?: string }).currency;
             if (currency) {
-              totalPointsToDeduct += currencyToPoints(
+              totalPointsToDeduct += currencyToRedemptionPoints(
                 amount.centAmount,
                 currency,
-                conversionRates
+                redemptionRates
               );
             }
           }
@@ -226,10 +284,10 @@ export async function getPointRedemptionPointsToDeduct(
               (amount as { currencyCode?: string }).currencyCode ??
               (amount as { currency?: string }).currency;
             if (currency) {
-              totalPointsToDeduct += currencyToPoints(
+              totalPointsToDeduct += currencyToRedemptionPoints(
                 amount.centAmount,
                 currency,
-                conversionRates
+                redemptionRates
               );
             }
           }
@@ -262,10 +320,10 @@ export async function getPointRedemptionPointsToDeduct(
               (value?.money as { currencyCode?: string })?.currencyCode ??
               (value?.money as { currency?: string })?.currency;
             if (currency) {
-              totalPointsToDeduct += currencyToPoints(
+              totalPointsToDeduct += currencyToRedemptionPoints(
                 centAmount,
                 currency,
-                conversionRates
+                redemptionRates
               );
             }
           }

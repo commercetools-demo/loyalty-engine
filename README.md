@@ -44,18 +44,21 @@ The event app implements a loyalty engine that awards points from order payments
 
 **CartDiscount** (type key: `additional-discount-info`)
 
-| Field name          | Type    | Description                                                                 |
-|---------------------|---------|-----------------------------------------------------------------------------|
-| `isPointRedemtion`  | Boolean | When `true`, this discount is a point redemption (also accept `isPointRedemption`). |
-| `referenceCartId`     | String  | Cart ID; points are only deducted when this equals the order’s `cart.id`.  |
+| Field name           | Type    | Description                                                                 |
+|----------------------|---------|-----------------------------------------------------------------------------|
+| `isPointRedemtion`   | Boolean | When `true`, this discount is a point redemption (`isPointRedemption` also accepted). |
+| `referenceCart`      | String  | Cart ID; points are only deducted when this equals the order’s `cart.id`. `referenceCartId` also accepted. |
 
-### Custom object (conversion rates)
+### Custom objects (rates)
 
-| Container           | Key               | Value shape                                                                 |
-|---------------------|-------------------|-----------------------------------------------------------------------------|
-| `LOYALTY_CONTAINER` | `CONVERSION_RATES` | JSON array of objects: `{ "currency": "USD", "currencyCentAmount": 100, "pointAmount": 1 }` |
+Same structure for both: JSON array of `{ "currency", "currencyCentAmount", "pointAmount" }`.
 
-Example value:
+| Container           | Key                | Purpose                                                                 |
+|---------------------|--------------------|-------------------------------------------------------------------------|
+| `LOYALTY_CONTAINER` | `CONVERSION_RATES` | Payment amount → points **earned** (e.g. 100 cents USD = 1 point).      |
+| `LOYALTY_CONTAINER` | `REDEMPTION_RATES` | Discount amount → points **deducted** for point-redemption discounts.   |
+
+Example value (same shape for both keys):
 
 ```json
 [

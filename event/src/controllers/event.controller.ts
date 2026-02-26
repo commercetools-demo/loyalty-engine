@@ -4,6 +4,7 @@ import CustomError from '../errors/custom.error';
 import { logger } from '../utils/logger.utils';
 import {
   getConversionRates,
+  getRedemptionRates,
   getPointsFromPayments,
   getPointRedemptionPointsToDeduct,
   getCurrentAvailablePoints,
@@ -110,6 +111,8 @@ async function handleOrderCreated(
     return;
   }
 
+  const redemptionRates = await getRedemptionRates(apiRoot);
+
   const pointsFromPayments = await getPointsFromPayments(
     order as Parameters<typeof getPointsFromPayments>[0],
     apiRoot,
@@ -119,7 +122,7 @@ async function handleOrderCreated(
   const pointsToDeduct = await getPointRedemptionPointsToDeduct(
     order as Parameters<typeof getPointRedemptionPointsToDeduct>[0],
     apiRoot,
-    conversionRates
+    redemptionRates
   );
 
 
@@ -192,6 +195,8 @@ async function handleOrderCancelled(
     return;
   }
 
+  const redemptionRates = await getRedemptionRates(apiRoot);
+
   const pointsFromPayments = await getPointsFromPayments(
     order as Parameters<typeof getPointsFromPayments>[0],
     apiRoot,
@@ -200,7 +205,7 @@ async function handleOrderCancelled(
   const pointsToAddBack = await getPointRedemptionPointsToDeduct(
     order as Parameters<typeof getPointRedemptionPointsToDeduct>[0],
     apiRoot,
-    conversionRates
+    redemptionRates
   );
 
   const {
