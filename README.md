@@ -47,7 +47,7 @@ The event app implements a loyalty engine that awards points from order payments
 | Field name          | Type    | Description                                                                 |
 |---------------------|---------|-----------------------------------------------------------------------------|
 | `isPointRedemtion`  | Boolean | When `true`, this discount is a point redemption (also accept `isPointRedemption`). |
-| `referenceCart`     | String  | Cart ID; points are only deducted when this equals the order’s `cart.id`.  |
+| `referenceCartId`     | String  | Cart ID; points are only deducted when this equals the order’s `cart.id`.  |
 
 ### Custom object (conversion rates)
 
